@@ -1,0 +1,79 @@
+version: "3.8"
+
+networks:
+  saas-network:
+    driver: bridge
+
+services:
+  # =============================
+  # Banco de Dados - Communication Service (PostgreSQL)
+  # =============================
+  communication-db:
+    image: postgres:16-alpine
+    container_name: communication-db
+    environment:
+      - POSTGRES_USER=communication
+      - POSTGRES_PASSWORD=Communication@123456
+      - POSTGRES_DB=communication
+    ports:
+      - "5436:5432"
+    volumes:
+      - communication_data:/var/lib/postgresql/data
+    networks:
+      - saas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U communication -d communication"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # =============================
+  # Communication Service API
+  # =============================
+  communication-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+      args:
+        - NUGET_SOURCE_URL=${NUGET_SOURCE_URL}
+        - NUGET_USERNAME=${NUGET_USERNAME}
+        - NUGET_PASSWORD=${NUGET_PASSWORD}
+    image: communication-service-api:latest
+    container_name: communication-service-api
+    depends_on:
+      communication-db:
+        condition: service_healthy
+    ports:
+      - "5006:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__CommunicationDb=Host=communication-db;Port=5432;Database=communication;Username=communication;Password=Communication@123456;
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - RabbitMQ__Host=host.docker.internal
+      - RabbitMQ__Port=5672
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+      - ExternalServices__MessageService__BaseUrl=http://host.docker.internal:5275
+    volumes:
+      - .:/src
+      - communication_bin:/src/bin
+      - communication_obj:/src/obj
+    networks:
+      - saas-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  communication_data:
+    driver: local
+  communication_bin:
+    driver: local
+  communication_obj:
+    driver: local
